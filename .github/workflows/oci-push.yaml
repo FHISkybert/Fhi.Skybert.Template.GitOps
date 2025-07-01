@@ -1,0 +1,94 @@
+name: Push Helm Template as OCI
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  APP_NAME: <APPLICATION_NAME>
+  ACR_NAME: crfhiskybert
+  APP_REPOSITORY: <APPLICATION_REPOSITORY>
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Install Flux
+      run: curl -s https://fluxcd.io/install.sh | bash
+
+    - name: Setup Helm
+      uses: azure/setup-helm@v3
+      with:
+        version: 'v3.12.0'
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        client-id: ${{ vars.AZURE_CLIENT_ID }}
+        tenant-id: ${{ vars.AZURE_TENANT_ID }}
+        subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Set Azure Subscription
+      run: |
+        az account set --subscription ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+    - name: Docker Login to ACR
+      run: az acr login --name ${{ env.ACR_NAME }}
+
+    - name: Discover environments
+      id: discover-envs
+      run: |
+        # Find all non-hidden directories in the root that contain Chart.yaml
+        ENVS=$(find . -maxdepth 1 -type d -not -path "./.git*" -not -path "./.github*" -not -path "." | sed 's|^\./||' | tr '\n' ' ')
+        echo "environments=$ENVS" >> $GITHUB_OUTPUT
+        echo "Found environments: $ENVS"
+
+    - name: Create rendered directory
+      run: |
+        mkdir -p rendered
+
+    - name: Build and push for each environment
+      run: |
+        ENVS="${{ steps.discover-envs.outputs.environments }}"
+        APP_NAME="${{ env.APP_NAME }}"
+        ACR_NAME="${{ env.ACR_NAME }}"
+        
+        for env in $ENVS; do
+          echo "Processing environment: $env"
+          
+          # Check if the environment directory contains a Chart.yaml
+          if [ ! -f "$env/Chart.yaml" ]; then
+            echo "Skipping $env - no Chart.yaml found"
+            continue
+          fi
+          
+          # Create rendered directory for this environment
+          mkdir -p rendered/$env
+          
+          # Update Helm dependencies for this environment
+          echo "Updating dependencies for $env..."
+          cd $env
+          helm dependency update
+          
+          # Generate templates for this environment
+          echo "Generating templates for $env..."
+          helm template ${APP_NAME}-${env} . > ../rendered/$env/all_${env}.yaml
+          cd ..
+          
+          # Push OCI artifact for this environment
+          echo "Pushing OCI artifact for $env..."
+          flux push artifact oci://${ACR_NAME}.azurecr.io/${APP_NAME}/gitops_${env}:latest \
+            --path=rendered/$env \
+            --source=git@github.com:FHIDev/${APP_REPOSITORY} \
+            --revision=main@${GITHUB_SHA}
+          
+          echo "Completed processing $env"
+        done

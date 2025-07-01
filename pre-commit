@@ -1,0 +1,63 @@
+#!/bin/sh
+
+# Pre-commit hook to validate Helm templates
+# Cross-platform compatible (Windows/Linux/macOS)
+
+set -e
+
+echo "Running Helm template validation..."
+
+# Check if Helm is installed
+if ! command -v helm >/dev/null 2>&1; then
+    echo "Error: Helm is not installed. Please install Helm 3.x first."
+    exit 1
+fi
+
+# Find all non-hidden directories in the root that contain Chart.yaml
+# Use find with proper escaping for Windows compatibility
+ENVS=$(find . -maxdepth 1 -type d -not -path "./.git*" -not -path "./.github*" -not -path "." | sed 's|^\./||' | tr '\n' ' ')
+
+echo "Found environments: $ENVS"
+
+ERRORS=0
+
+for env in $ENVS; do
+    echo "Validating environment: $env"
+    
+    # Check if the environment directory contains a Chart.yaml
+    if [ ! -f "$env/Chart.yaml" ]; then
+        echo "Skipping $env - no Chart.yaml found"
+        continue
+    fi
+    
+    # Update Helm dependencies for this environment
+    echo "  Updating dependencies..."
+    cd "$env" || exit 1
+    helm dependency update >/dev/null 2>&1
+    
+    # Test Helm template generation
+    echo "  Testing template generation..."
+    if helm template test . >/dev/null 2>&1; then
+        echo "  ✅ $env: Templates are valid"
+    else
+        echo "  ❌ $env: Template validation failed"
+        ERRORS=$((ERRORS + 1))
+    fi
+    
+    # Clean up generated files
+    echo "  Cleaning up..."
+    rm -f Chart.lock
+    rm -rf charts/
+    
+    cd ..
+done
+
+if [ $ERRORS -eq 0 ]; then
+    echo ""
+    echo "✅ All Helm templates are valid!"
+    exit 0
+else
+    echo ""
+    echo "❌ $ERRORS environment(s) have template errors. Please fix before committing."
+    exit 1
+fi 
