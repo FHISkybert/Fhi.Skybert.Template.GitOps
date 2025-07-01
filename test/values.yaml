@@ -3,27 +3,26 @@
 
 
 global:
-  nameOverride: blixtest
-  namespace: tn-blixtest
+  nameOverride: <APPLICATION_NAME>
+  namespace: tn-<APPLICATION_NAME>
 
 base-app:
-  # Override the image to use nginx
   image:
-    repository: nginxdemos/hello
-    tag: "latest"
+    repository: crfhiskybert.azurecr.io/<APPLICATION_NAME>/<image_name>
+    tag: "latest" # NOTE: "latest" should not be used - replace with a specific tag in the CI pipeline of the application.
     pullPolicy: IfNotPresent
   replicas: 1
 
   ingress:
-    enabled: true
-    annotations:
-        cert-manager.io/cluster-issuer: fhi-k8s-letsencrypt-azuredns-issuer
-    hosts:
-      - host: blixtest.fhi-k8s.com
-        paths:
-          - path: /
-            pathType: Prefix
-    tls:
-      - hosts:
-          - blixtest.fhi-k8s.com
-        secretName: tls-blixtest
+#    enabled: true
+#    annotations:
+#        cert-manager.io/cluster-issuer: fhi-k8s-letsencrypt-azuredns-issuer
+#    hosts:
+#      - host: <APPLICATION_NAME>.fhi-k8s.com
+#        paths:
+#          - path: /
+#            pathType: Prefix
+#    tls:
+#      - hosts:
+#          - <APPLICATION_NAME>.fhi-k8s.com
+#        secretName: tls-<APPLICATION_NAME>
