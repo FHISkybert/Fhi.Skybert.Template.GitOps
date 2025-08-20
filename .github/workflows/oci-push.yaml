@@ -1,11 +1,11 @@
 name: Push Helm Template as OCI
 
 on:
-  - workflow_dispatch
-# Uncomment this to enable the workflow
-#  - push:
-#     branches:
-#       - main
+  workflow_dispatch:
+  # Uncomment this to enable the workflow
+  # push:
+  #   branches:
+  #   - main
 
 env:
   APP_NAME: <APPLICATION_NAME>
@@ -82,7 +82,7 @@ jobs:
           
           # Generate templates for this environment
           echo "Generating templates for $env..."
-          helm template ${APP_NAME}-${env} . > ../rendered/$env/all_${env}.yaml
+          helm template ${APP_NAME} . > ../rendered/$env/all_${env}.yaml
           cd ..
           
           # Push OCI artifact for this environment

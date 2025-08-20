@@ -1,0 +1,165 @@
+name: Update Tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      updates:
+        description: 'JSON array of repository-tag pairs, e.g. [{"repository": "myapp/api", "tag": "v1.2.3"}, {"repository": "myapp/frontend", "tag": "v2.1.0"}]'
+        required: true
+        type: string
+      env:
+        description: 'Environment folder name'
+        required: true
+        type: string
+
+jobs:
+  update-tag:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          
+      - name: Validate environment folder exists
+        run: |
+          if [ ! -d "${{ github.event.inputs.env }}" ]; then
+            echo "Error: Environment folder '${{ github.event.inputs.env }}' does not exist"
+            exit 1
+          fi
+          
+          if [ ! -f "${{ github.event.inputs.env }}/values.yaml" ]; then
+            echo "Error: values.yaml file not found in '${{ github.event.inputs.env }}' folder"
+            exit 1
+          fi
+          
+          echo "Found values.yaml in ${{ github.event.inputs.env }} folder"
+          
+      - name: Parse and validate updates input
+        id: parse_updates
+        run: |
+          UPDATES_JSON='${{ github.event.inputs.updates }}'
+          echo "Parsing updates: $UPDATES_JSON"
+          
+          # Validate JSON format
+          if ! echo "$UPDATES_JSON" | jq empty 2>/dev/null; then
+            echo "Error: Invalid JSON format in updates input"
+            exit 1
+          fi
+          
+          # Validate each entry has repository and tag
+          if ! echo "$UPDATES_JSON" | jq -e 'all(has("repository") and has("tag"))' >/dev/null; then
+            echo "Error: Each update entry must have both 'repository' and 'tag' fields"
+            exit 1
+          fi
+          
+          echo "✅ JSON validation passed"
+          echo "updates=$UPDATES_JSON" >> $GITHUB_OUTPUT
+          
+      - name: Update repository tags in values.yaml
+        run: |
+          VALUES_FILE="${{ github.event.inputs.env }}/values.yaml"
+          UPDATES_JSON='${{ steps.parse_updates.outputs.updates }}'
+          
+          echo "Updating repository tags in $VALUES_FILE"
+          echo "Updates to apply:"
+          echo "$UPDATES_JSON" | jq -r '.[] | "  - Repository: \(.repository) -> Tag: \(.tag)"'
+          
+          # Show current repository and tag values
+          echo ""
+          echo "Current repository and tag occurrences:"
+          grep -n -A1 -B1 "repository:\|tag:" "$VALUES_FILE" || echo "No repository/tag entries found"
+          
+          # Create a backup
+          cp "$VALUES_FILE" "${VALUES_FILE}.backup"
+          
+          # Get repository-tag blocks using grep
+          REPO_TAG_BLOCKS=$(grep -n -A1 -B1 "repository:\|tag:" "$VALUES_FILE")
+          
+          # Process each update
+          echo "$UPDATES_JSON" | jq -c '.[]' | while read -r update; do
+            REPOSITORY=$(echo "$update" | jq -r '.repository')
+            NEW_TAG=$(echo "$update" | jq -r '.tag')
+            
+            echo ""
+            echo "Processing: $REPOSITORY -> $NEW_TAG"
+            
+            # Find the line number of the matching repository
+            REPO_LINE=$(echo "$REPO_TAG_BLOCKS" | grep "repository:" | grep "$REPOSITORY" | cut -d: -f1)
+            
+            if [ -n "$REPO_LINE" ]; then
+                # Find the corresponding tag line (should be the next line with "tag:")
+                TAG_LINE=$(echo "$REPO_TAG_BLOCKS" | grep "^$((REPO_LINE + 1)):.*tag:" | cut -d: -f1)
+                
+                if [ -n "$TAG_LINE" ]; then
+                    echo "  Found repository at line $REPO_LINE, tag at line $TAG_LINE"
+                    
+                    # Use sed to update the specific tag line, preserving comments
+                    sed -i "${TAG_LINE}s/\(tag: *\)[\"']*[^\"'# ]*[\"']*/\1\"$NEW_TAG\"/g" "$VALUES_FILE"
+                    echo "  ✅ Updated tag on line $TAG_LINE"
+                else
+                    echo "  ⚠️  Could not find tag line after repository line $REPO_LINE"
+                fi
+            else
+                echo "  ⚠️  Repository '$REPOSITORY' not found or is commented out"
+            fi
+          done
+          
+          echo ""
+          echo "Updated repository and tag occurrences:"
+          grep -n -A1 -B1 "repository:\|tag:" "$VALUES_FILE" || echo "No repository/tag entries found"
+          
+          # Clean up backup
+          rm "${VALUES_FILE}.backup"
+          
+      - name: Check if changes were made
+        id: check_changes
+        run: |
+          if git diff --quiet; then
+            echo "No changes were made to the files"
+            echo "changes_made=false" >> $GITHUB_OUTPUT
+          else
+            echo "Changes detected:"
+            git diff
+            echo "changes_made=true" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Commit and push changes
+        if: steps.check_changes.outputs.changes_made == 'true'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add "${{ github.event.inputs.env }}/values.yaml"
+          
+          # Create commit message with all updates
+          UPDATES_JSON='${{ steps.parse_updates.outputs.updates }}'
+          COMMIT_MSG="Update tags in ${{ github.event.inputs.env }} environment"
+          UPDATES_LIST=$(echo "$UPDATES_JSON" | jq -r '.[] | "- \(.repository): \(.tag)"')
+          
+          git commit -m "$COMMIT_MSG" -m "$UPDATES_LIST"
+          git push
+     
+      - name: Summary
+        run: |
+          if [ "${{ steps.check_changes.outputs.changes_made }}" == "true" ]; then
+            echo "✅ Successfully updated repository tags in ${{ github.event.inputs.env }}/values.yaml"
+            UPDATES_JSON='${{ steps.parse_updates.outputs.updates }}'
+            echo "Updates applied:"
+            echo "$UPDATES_JSON" | jq -r '.[] | "  ✓ \(.repository) -> \(.tag)"'
+          else
+            echo "ℹ️ No changes were needed - all tags may already be set to the specified values"
+          fi
+          
+      - name: Trigger OCI push workflow
+        if: steps.check_changes.outputs.changes_made == 'true'
+        run: |
+          echo "Triggering OCI push workflow to rebuild manifests..."
+          curl -L \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/oci-push.yaml/dispatches \
+            -d '{"ref":"main"}'
+
