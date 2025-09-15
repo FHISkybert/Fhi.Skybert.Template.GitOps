@@ -1,4 +1,4 @@
-name: Update Tag
+5name: Update Tag
 
 on:
   workflow_dispatch:
@@ -29,13 +29,32 @@ jobs:
             exit 1
           fi
           
-          if [ ! -f "${{ github.event.inputs.env }}/values.yaml" ]; then
-            echo "Error: values.yaml file not found in '${{ github.event.inputs.env }}' folder"
-            exit 1
+          echo "Found environment folder: ${{ github.event.inputs.env }}"
+          
+      - name: Detect deployment method
+        id: detect_method
+        run: |
+          ENV_DIR="${{ github.event.inputs.env }}"
+          DEPLOYMENT_METHOD=""
+          
+          # Check for Helm
+          if [ -f "$ENV_DIR/Chart.yaml" ] && [ -f "$ENV_DIR/values.yaml" ]; then
+            DEPLOYMENT_METHOD="helm"
+            echo "Detected Helm deployment (Chart.yaml + values.yaml)"
+            
+          # Check for Kustomize
+          elif [ -f "$ENV_DIR/kustomization.yaml" ]; then
+            DEPLOYMENT_METHOD="kustomize"
+            echo "Detected Kustomize deployment (kustomization.yaml)"
+            
+          # Check for plain YAML (look for common Kubernetes resource files)
+          else
+            DEPLOYMENT_METHOD="yaml"
+            echo "Defaulting to plain YAML deployment"
           fi
           
-          echo "Found values.yaml in ${{ github.event.inputs.env }} folder"
-          
+          echo "deployment_method=$DEPLOYMENT_METHOD" >> $GITHUB_OUTPUT
+
       - name: Parse and validate updates input
         id: parse_updates
         run: |
@@ -57,61 +76,100 @@ jobs:
           echo "✅ JSON validation passed"
           echo "updates=$UPDATES_JSON" >> $GITHUB_OUTPUT
           
-      - name: Update repository tags in values.yaml
+      - name: Update repository tags
         run: |
-          VALUES_FILE="${{ github.event.inputs.env }}/values.yaml"
+          ENV_DIR="${{ github.event.inputs.env }}"
           UPDATES_JSON='${{ steps.parse_updates.outputs.updates }}'
           
-          echo "Updating repository tags in $VALUES_FILE"
+          echo "Updating repository tags in $ENV_DIR"
           echo "Updates to apply:"
           echo "$UPDATES_JSON" | jq -r '.[] | "  - Repository: \(.repository) -> Tag: \(.tag)"'
-          
-          # Show current repository and tag values
+
+          # Find all YAML files in the environment directory
+          YAML_FILES=$(find "$ENV_DIR" -name "*.yaml" -o -name "*.yml")
+
+          if [ -z "$YAML_FILES" ]; then
+          echo "No YAML files found in $ENV_DIR"
+          exit 1
+          fi
+
           echo ""
-          echo "Current repository and tag occurrences:"
-          grep -n -A1 -B1 "repository:\|tag:" "$VALUES_FILE" || echo "No repository/tag entries found"
-          
-          # Create a backup
-          cp "$VALUES_FILE" "${VALUES_FILE}.backup"
-          
-          # Get repository-tag blocks using grep
-          REPO_TAG_BLOCKS=$(grep -n -A1 -B1 "repository:\|tag:" "$VALUES_FILE")
-          
+          echo "Found YAML files to process:"
+          echo "$YAML_FILES"
+
           # Process each update
           echo "$UPDATES_JSON" | jq -c '.[]' | while read -r update; do
-            REPOSITORY=$(echo "$update" | jq -r '.repository')
-            NEW_TAG=$(echo "$update" | jq -r '.tag')
-            
-            echo ""
-            echo "Processing: $REPOSITORY -> $NEW_TAG"
-            
-            # Find the line number of the matching repository
-            REPO_LINE=$(echo "$REPO_TAG_BLOCKS" | grep "repository:" | grep "$REPOSITORY" | cut -d: -f1)
-            
-            if [ -n "$REPO_LINE" ]; then
-                # Find the corresponding tag line (should be the next line with "tag:")
-                TAG_LINE=$(echo "$REPO_TAG_BLOCKS" | grep "^$((REPO_LINE + 1)):.*tag:" | cut -d: -f1)
-                
-                if [ -n "$TAG_LINE" ]; then
-                    echo "  Found repository at line $REPO_LINE, tag at line $TAG_LINE"
-                    
-                    # Use sed to update the specific tag line, preserving comments
-                    sed -i "${TAG_LINE}s/\(tag: *\)[\"']*[^\"'# ]*[\"']*/\1\"$NEW_TAG\"/g" "$VALUES_FILE"
-                    echo "  ✅ Updated tag on line $TAG_LINE"
-                else
-                    echo "  ⚠️  Could not find tag line after repository line $REPO_LINE"
-                fi
-            else
-                echo "  ⚠️  Repository '$REPOSITORY' not found or is commented out"
-            fi
+              REPOSITORY=$(echo "$update" | jq -r '.repository')
+              NEW_TAG=$(echo "$update" | jq -r '.tag')
+
+              echo ""
+              echo "Processing: $REPOSITORY -> $NEW_TAG"
+
+              UPDATED_ANY_FILE=false
+
+              # Process each YAML file - use process substitution instead of pipe to avoid subshell
+              while IFS= read -r yaml_file; do
+                  if [ ! -f "$yaml_file" ]; then
+                  continue
+                  fi
+                  
+                  
+                  # Method 1: Look for two-line format (repository: ... \n tag: ...)
+                  REPO_TAG_BLOCKS=$(grep -n -A1 -B1 "repository:\|tag:" "$yaml_file" 2>/dev/null)
+                  
+                  if [ -n "$REPO_TAG_BLOCKS" ]; then
+                      # Find the line number of the matching repository
+                      REPO_LINE=$(echo "$REPO_TAG_BLOCKS" | grep "repository:" | grep "$REPOSITORY" | cut -d: -f1)
+                      
+                      if [ -n "$REPO_LINE" ]; then
+                          # Find the corresponding tag line (should be the next line with "tag:")
+                          TAG_LINE=$(echo "$REPO_TAG_BLOCKS" | grep "^$((REPO_LINE + 1)):.*tag:" | cut -d: -f1)
+                          
+                          if [ -n "$TAG_LINE" ]; then
+                              echo "    Found two-line format in $yaml_file: repository at line $REPO_LINE, tag at line $TAG_LINE"
+                              
+                              # Use sed to update the specific tag line, preserving comments
+                              sed -i "${TAG_LINE}s/\(tag: *\)[\"']*[^\"'# ]*[\"']*/\1\"$NEW_TAG\"/g" "$yaml_file"
+                              echo "    ✅ Updated tag on line $TAG_LINE"
+                              UPDATED_ANY_FILE=true
+                              continue
+                          fi
+                      fi
+                  fi
+                  
+                  # Method 2: Look for single-line image format (image: repository:tag)
+                  IMAGE_LINES=$(grep -n "image:\|value:" "$yaml_file" 2>/dev/null)
+                  
+                  if [ -n "$IMAGE_LINES" ]; then
+                      # Use process substitution to avoid subshell issue
+                      while IFS=: read -r line_num line_content; do
+                          # Check if this line contains the repository (fuzzy match)
+                          if echo "$line_content" | grep -q "$REPOSITORY"; then
+                          echo "    Found single-line image format in $yaml_file at line $line_num: $line_content"
+                              # Handle formats like: image: repo:tag, image: "repo:tag", image: 'repo:tag'
+                              # Use sed to replace the tag part, preserving quotes and whitespace
+                              sed -i "${line_num}s/\(image:.*$REPOSITORY:\|value:.*$REPOSITORY:\)[^\"'[:space:]]*/\1$NEW_TAG/g" "$yaml_file"
+                              echo "    ✅ Updated image tag on line $line_num"
+                              UPDATED_ANY_FILE=true
+                          fi
+                      done < <(echo "$IMAGE_LINES")
+                  fi
+              done < <(echo "$YAML_FILES")
+
+              if [ "$UPDATED_ANY_FILE" = "false" ]; then
+                  echo "    ⚠️  Repository '$REPOSITORY' not found in any YAML files"
+              fi
           done
-          
+
           echo ""
           echo "Updated repository and tag occurrences:"
-          grep -n -A1 -B1 "repository:\|tag:" "$VALUES_FILE" || echo "No repository/tag entries found"
-          
-          # Clean up backup
-          rm "${VALUES_FILE}.backup"
+          echo "$YAML_FILES" | while read -r yaml_file; do
+              if [ -f "$yaml_file" ]; then
+                  echo "=== $yaml_file ==="
+                  grep -n -A1 -B1 "repository:\|tag:\|image:" "$yaml_file" 2>/dev/null || echo "No repository/tag/image entries found"
+                  echo ""
+              fi
+          done
           
       - name: Check if changes were made
         id: check_changes
@@ -130,7 +188,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add "${{ github.event.inputs.env }}/values.yaml"
+          git add "${{ github.event.inputs.env }}/"
           
           # Create commit message with all updates
           UPDATES_JSON='${{ steps.parse_updates.outputs.updates }}'
@@ -143,7 +201,7 @@ jobs:
       - name: Summary
         run: |
           if [ "${{ steps.check_changes.outputs.changes_made }}" == "true" ]; then
-            echo "✅ Successfully updated repository tags in ${{ github.event.inputs.env }}/values.yaml"
+            echo "✅ Successfully updated repository tags in ${{ github.event.inputs.env }}"
             UPDATES_JSON='${{ steps.parse_updates.outputs.updates }}'
             echo "Updates applied:"
             echo "$UPDATES_JSON" | jq -r '.[] | "  ✓ \(.repository) -> \(.tag)"'

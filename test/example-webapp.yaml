@@ -1,0 +1,13 @@
+apiVersion: skybert.fhi.no/v1
+kind: WebApp
+metadata:
+  name: example-app
+spec:
+  container:
+    image:
+      repository: paulbouwer/hello-kubernetes
+      tag: "1.10"
+
+  ingress:
+    enabled: false
+    hostname: example.skytest.fhi.no
