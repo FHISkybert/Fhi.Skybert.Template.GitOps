@@ -1,4 +1,4 @@
-5name: Update Tag
+name: Update Tag
 
 on:
   workflow_dispatch:
