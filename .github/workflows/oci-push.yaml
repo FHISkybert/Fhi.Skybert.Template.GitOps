@@ -48,12 +48,28 @@ jobs:
     - name: Install Cosign
       uses: sigstore/cosign-installer@v3.9.2
 
-    - name: Azure Login
-      uses: azure/login@v2
+    - name: Request GitHub OIDC Token
+      id: get_token
+      uses: actions/github-script@v7
       with:
-        client-id: ${{ vars.AZURE_CLIENT_ID }}
-        tenant-id: ${{ vars.AZURE_TENANT_ID }}
-        subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        script: |
+          const idToken = await core.getIDToken('api://AzureADTokenExchange');
+          core.setOutput('token', idToken);
+
+    - name: Login to Azure using Federated Identity
+      env:
+        AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+        AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+        AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+        FEDERATED_TOKEN: ${{ steps.get_token.outputs.token }}
+      run: |
+        echo "Logging in to Azure with federated identity..."
+        az login \
+          --service-principal \
+          --username "$AZURE_CLIENT_ID" \
+          --tenant "$AZURE_TENANT_ID" \
+          --federated-token "$FEDERATED_TOKEN" \
+          --allow-no-subscriptions
 
     - name: Docker Login to ACR
       run: az acr login --name ${{ env.ACR_NAME }} --subscription ${{ vars.AZURE_SUBSCRIPTION_ID }}
