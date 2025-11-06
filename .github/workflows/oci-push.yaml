@@ -8,7 +8,7 @@ on:
   #   - main
 
 env:
-  APP_NAME: <APPLICATION_NAME>
+  APP_NAME: metadata
   ACR_NAME: crfhiskybert
 
 jobs:
