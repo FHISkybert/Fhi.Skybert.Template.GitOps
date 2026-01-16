@@ -9,5 +9,5 @@ spec:
       tag: "1.10"
 
   ingress:
-    enabled: false
-    hostname: example.skytest.fhi.no
+    enabled: true
+    hostname: <TENANT>.skytest.fhi.no
