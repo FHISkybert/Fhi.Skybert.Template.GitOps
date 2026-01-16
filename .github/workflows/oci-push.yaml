@@ -7,7 +7,7 @@ on:
     - main
 
 env:
-  APP_NAME: <APPLICATION_NAME>
+  TENANT: <TENANT>
   ACR_NAME: crfhiskybert
 
 jobs:
@@ -88,7 +88,7 @@ jobs:
     - name: Build, sign, and push for each environment
       run: |
         ENVS="${{ steps.discover-envs.outputs.environments }}"
-        APP_NAME="${{ env.APP_NAME }}"
+        TENANT="${{ env.TENANT }}"
         ACR_NAME="${{ env.ACR_NAME }}"
         
         digests=""
@@ -120,7 +120,7 @@ jobs:
               echo "Processing Helm chart for $env..."
               cd $env
               helm dependency update
-              helm template ${APP_NAME} . > ../rendered/$env/all_${env}.yaml
+              helm template ${TENANT} . > ../rendered/$env/all_${env}.yaml
               cd ..
               ;;
             "kustomize")
@@ -140,7 +140,7 @@ jobs:
           # Push OCI artifact for this environment
           echo "Pushing OCI artifact for $env..."
           digest_url=$(flux push artifact \
-            oci://${ACR_NAME}.azurecr.io/${APP_NAME}/gitops_${env}:latest \
+            oci://${ACR_NAME}.azurecr.io/${TENANT}/gitops_${env}:latest \
               --source="$(git config --get remote.origin.url)" \
               --revision="$(git branch --show-current)@sha1:$(git rev-parse HEAD)" \
               --path=rendered/$env \
