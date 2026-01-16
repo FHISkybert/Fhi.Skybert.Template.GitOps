@@ -2,6 +2,7 @@ apiVersion: skybert.fhi.no/v1
 kind: WebApp
 metadata:
   name: example-app
+  namespace: tn-<TENANT>
 spec:
   container:
     image:
