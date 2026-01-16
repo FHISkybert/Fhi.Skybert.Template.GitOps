@@ -2,10 +2,9 @@ name: Push Helm Template as OCI
 
 on:
   workflow_dispatch:
-  # Uncomment this to enable the workflow
-  # push:
-  #   branches:
-  #   - main
+  push:
+    branches:
+    - main
 
 env:
   APP_NAME: <APPLICATION_NAME>
