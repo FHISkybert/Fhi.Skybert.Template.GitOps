@@ -1,0 +1,11 @@
+apiVersion: skybert.fhi.no/v1alpha1
+kind: SkybertApp
+metadata:
+  name: example-skybertapp
+  namespace: tn-<TENANT>
+spec:
+  image:
+    repository: paulbouwer/hello-kubernetes
+    tag: "1.10"
+
+  hostname: <TENANT>.sandbox.skytest.fhi.no

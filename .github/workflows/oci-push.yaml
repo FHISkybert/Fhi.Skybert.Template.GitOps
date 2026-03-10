@@ -73,21 +73,13 @@ jobs:
     - name: Docker Login to ACR
       run: az acr login --name ${{ env.ACR_NAME }} --subscription ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-    - name: Discover environments
-      id: discover-envs
-      run: |
-        # Find all non-hidden directories in the root (omit "base" for kustomize)
-        ENVS=$(find . -maxdepth 1 -type d -not -path "./.*" -not -path "." -not -path "./base*" | sed 's|^\./||' | tr '\n' ' ')
-        echo "environments=$ENVS" >> $GITHUB_OUTPUT
-        echo "Found environments: $ENVS"
-
     - name: Create rendered directory
       run: |
         mkdir -p rendered
 
     - name: Build, sign, and push for each environment
       run: |
-        ENVS="${{ steps.discover-envs.outputs.environments }}"
+        ENVS="sandbox test prod"
         TENANT="${{ env.TENANT }}"
         ACR_NAME="${{ env.ACR_NAME }}"
         
