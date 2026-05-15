@@ -109,15 +109,15 @@ jobs:
                   
                   
                   # Method 1: Look for two-line format (repository: ... \n tag: ...)
-                  REPO_TAG_BLOCKS=$(grep -n -A1 -B1 "repository:\|tag:" "$yaml_file" 2>/dev/null)
+                  REPO_TAG_BLOCKS=$(grep -n -A1 -B1 "repository:\|tag:" "$yaml_file" 2>/dev/null || true)
                   
                   if [ -n "$REPO_TAG_BLOCKS" ]; then
                       # Find the line number of the matching repository
-                      REPO_LINE=$(echo "$REPO_TAG_BLOCKS" | grep "repository:" | grep "$REPOSITORY" | cut -d: -f1)
+                      REPO_LINE=$(echo "$REPO_TAG_BLOCKS" | grep "repository:" | grep "$REPOSITORY" | cut -d: -f1 || true)
                       
                       if [ -n "$REPO_LINE" ]; then
                           # Find the corresponding tag line (should be the next line with "tag:")
-                          TAG_LINE=$(echo "$REPO_TAG_BLOCKS" | grep "^$((REPO_LINE + 1)):.*tag:" | cut -d: -f1)
+                          TAG_LINE=$(echo "$REPO_TAG_BLOCKS" | grep "^$((REPO_LINE + 1)):.*tag:" | cut -d: -f1 || true)
                           
                           if [ -n "$TAG_LINE" ]; then
                               echo "    Found two-line format in $yaml_file: repository at line $REPO_LINE, tag at line $TAG_LINE"
@@ -132,7 +132,7 @@ jobs:
                   fi
                   
                   # Method 2: Look for single-line image format (image: repository:tag)
-                  IMAGE_LINES=$(grep -n "image:\|value:" "$yaml_file" 2>/dev/null)
+                  IMAGE_LINES=$(grep -n "image:\|value:" "$yaml_file" 2>/dev/null || true)
                   
                   if [ -n "$IMAGE_LINES" ]; then
                       # Use process substitution to avoid subshell issue
