@@ -16,8 +16,9 @@ jobs:
 
       - name: Parse payload
         id: parse_payload
+        env:
+          PAYLOAD: ${{ toJson(github.event.client_payload) }}
         run: |
-          PAYLOAD='${{ toJson(github.event.client_payload) }}'
           echo "Raw payload: $PAYLOAD"
       
           # Validate payload is JSON
