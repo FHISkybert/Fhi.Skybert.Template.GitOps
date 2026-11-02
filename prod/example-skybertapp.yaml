@@ -1,4 +1,4 @@
-apiVersion: skybert.fhi.no/v1alpha1
+apiVersion: skybert-beta.fhi.no/v1beta1
 kind: SkybertApp
 metadata:
   name: example-skybertapp
@@ -9,3 +9,4 @@ spec:
     tag: "1.10"
 
   hostname: <TENANT>.sky.fhi.no
+  nework: fhinett
